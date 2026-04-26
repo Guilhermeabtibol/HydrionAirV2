@@ -3,19 +3,29 @@ import serial.tools.list_ports
 import json
 import threading
 import time
-from flask import Flask, jsonify, send_from_directory
+import os
+from flask import Flask, jsonify
 from flask_cors import CORS
 
-app = Flask(__name__, static_folder='../frontend/build', static_url_path='')
-CORS(app)  # Permite requisições do React em desenvolvimento
+app = Flask(__name__)
+CORS(app)  # Permite requisições do React
 
 # ------------------ CONFIGURAÇÃO DA SERIAL ------------------
 def find_arduino_port():
     """Tenta encontrar automaticamente a porta do Arduino."""
+    # Primeiro, verifica se foi passada por variável de ambiente
+    env_port = os.environ.get('ARDUINO_PORT')
+    if env_port:
+        print(f"📌 Usando porta da variável de ambiente: {env_port}")
+        return env_port
+    
+    # Tenta detectar automaticamente
     ports = serial.tools.list_ports.comports()
     for port in ports:
-        if 'Arduino' in port.description or 'USB' in port.description:
+        print(f"🔍 Porta encontrada: {port.device} - {port.description}")
+        if 'Arduino' in port.description or 'USB' in port.description or 'ttyUSB' in port.device:
             return port.device
+    
     # Se não encontrar, tenta portas comuns
     for p in ['/dev/ttyUSB0', '/dev/ttyACM0']:
         try:
@@ -26,17 +36,32 @@ def find_arduino_port():
             pass
     return None
 
-PORTA = find_arduino_port()
+# Verifica se estamos rodando no Docker (arquivo .dockerenv existe)
+is_docker = os.path.exists('/.dockerenv')
+if is_docker:
+    print("🐳 Rodando dentro do container Docker")
+    # No Docker, geralmente a porta é /dev/ttyUSB0 (montada)
+    PORTA = '/dev/ttyUSB0'
+    # Aguarda o dispositivo aparecer (pode demorar alguns segundos)
+    for _ in range(10):
+        if os.path.exists(PORTA):
+            break
+        time.sleep(1)
+else:
+    PORTA = find_arduino_port()
+
 if PORTA is None:
     print("⚠️ Arduino não encontrado! Verifique a conexão e as permissões.")
     print("   Execute: sudo usermod -a -G dialout $USER e reinicie.")
-    PORTA = '/dev/ttyUSB0'  # fallback, pode dar erro
+    print("   Ou no Docker: certifique-se de que o dispositivo está montado.")
+    PORTA = '/dev/ttyUSB0'  # fallback
 
 print(f"📡 Conectando ao Arduino na porta {PORTA}")
 
 try:
     ser = serial.Serial(PORTA, 9600, timeout=1)
     time.sleep(2)  # Aguarda estabilização
+    print("✅ Serial aberta com sucesso!")
 except Exception as e:
     print(f"❌ Erro ao abrir a porta {PORTA}: {e}")
     ser = None
@@ -53,7 +78,9 @@ def ler_serial():
     """Thread que lê a serial continuamente e atualiza ultimo_dado."""
     global ultimo_dado
     if ser is None:
+        print("⚠️ Thread serial não iniciada: ser é None")
         return
+    print("🔄 Thread de leitura serial iniciada")
     while True:
         try:
             linha = ser.readline().decode('utf-8').strip()
@@ -63,7 +90,9 @@ def ler_serial():
                 if "erro" not in dado:
                     dado["timestamp"] = time.time()
                     ultimo_dado = dado
-                    print(f"✅ Dado recebido: {dado}")  # opcional
+                    print(f"✅ Dado recebido: {dado}")
+                else:
+                    print(f"⚠️ Erro do sensor: {dado}")
         except json.JSONDecodeError:
             print(f"⚠️ Linha não-JSON: {linha}")
         except Exception as e:
@@ -83,14 +112,12 @@ def api_dados():
     """Retorna o último dado lido do Arduino."""
     return jsonify(ultimo_dado)
 
-@app.route('/')
-def serve_react():
-    """Serve o frontend React (após build)."""
-    return send_from_directory(app.static_folder, 'index.html')
-
-@app.errorhandler(404)
-def not_found(e):
-    return send_from_directory(app.static_folder, 'index.html')
+@app.route('/api/health')
+def health():
+    """Endpoint para verificar se o backend está vivo."""
+    return jsonify({"status": "ok", "serial_connected": ser is not None})
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=False)
+    # Usa a porta definida por ambiente ou 5000
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=False)

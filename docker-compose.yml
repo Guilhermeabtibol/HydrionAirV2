@@ -1,0 +1,25 @@
+version: '3.8'
+
+services:
+  backend:
+    build: ./backend
+    container_name: hydrion_backend
+    ports:
+      - "5000:5000"
+    volumes:
+      - /dev/ttyUSB0:/dev/ttyUSB0
+    environment:
+      - PORT=5000
+      - ARDUINO_PORT=/dev/ttyUSB0   # opcional, mas explícito
+    # Necessário para acesso à porta serial
+    privileged: true
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    container_name: hydrion_frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    restart: unless-stopped

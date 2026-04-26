@@ -1,0 +1,24 @@
+# Arquivos do sistema
+.git
+.gitignore
+README.md
+
+# Python
+__pycache__/
+*.pyc
+venv/
+*.pyo
+
+# Node
+node_modules/
+npm-debug.log
+
+# IDE
+.vscode/
+.idea/
+
+# Arduino (opcional, se não quiser incluir no contexto do build)
+arduino/*/build/
+
+# Logs
+*.log
